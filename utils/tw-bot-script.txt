@@ -1,0 +1,128 @@
+function checkLatestTribalWarsEmail() {
+  var labelName = 'feldolgozott';
+  var label = GmailApp.getUserLabelByName(labelName);
+  if (!label) {
+    label = GmailApp.createLabel(labelName);
+  }
+
+  var triggers = ScriptApp.getProjectTriggers();
+  var hasTrigger = triggers.some(function(t) { return t.getHandlerFunction() === 'checkLatestTribalWarsEmail'; });
+
+  if (!hasTrigger) {
+    var threads = GmailApp.search('(from:noreply@tribalwars.net OR from:tribalwarsbots@gmail.com) -label:' + labelName);
+    if (threads.length > 0) {
+      label.addToThreads(threads);
+    }
+
+    ScriptApp.newTrigger('checkLatestTribalWarsEmail')
+      .timeBased()
+      .everyMinutes(1)
+      .create();
+
+    processNewEmails(labelName, label);
+    return;
+  }
+
+  processNewEmails(labelName, label);
+}
+
+function processNewEmails(labelName, label) {
+  var webhookUrl = "";
+  var threads = GmailApp.search('(from:noreply@tribalwars.net) -label:' + labelName, 0, 1);
+
+  if (threads.length === 0) return;
+
+  var messages = threads[0].getMessages();
+  var message = messages[messages.length - 1];
+  var body = message.getPlainBody();
+
+  var nameMatch = body.match(/^Szia (.+?)!/m);
+  var playerName = nameMatch ? nameMatch[1].trim() : "Ismeretlen";
+
+  var lines = body.split('\n');
+  var coordRegex = /\(?\d{1,3}\|\d{1,3}\)?/;
+  var attacksByCoord = {};
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    var match = line.match(coordRegex);
+    if (match) {
+      var coord = match[0].replace(/[()]/g, '');
+      if (!attacksByCoord[coord]) {
+        attacksByCoord[coord] = [];
+      }
+
+      // Csak a második '*' utáni rész maradjon meg, ha van
+      var parts = line.split('*');
+      var trimmed = parts.length > 2 ? parts.slice(2).join('*').trim() : line;
+
+      attacksByCoord[coord].push(trimmed);
+    }
+  }
+
+  if (Object.keys(attacksByCoord).length === 0) {
+    label.addToThread(threads[0]);
+    return;
+  }
+
+  var embeds = [];
+  var currentEmbed = {
+    title: playerName,
+    color: 0xBE1931,
+    fields: []
+  };
+  var charCount = 0;
+
+  for (var coord in attacksByCoord) {
+    var attacks = attacksByCoord[coord];
+    var attackCount = attacks.length;
+    var valueText = attacks.join('\n');
+
+    if (valueText.length > 1024) {
+      valueText = valueText.substring(0, 1020) + "…";
+    }
+
+    var field = {
+      name: `📌 ${attackCount} új támadás: (${coord})`,
+      value: valueText,
+      inline: false
+    };
+
+    charCount += field.name.length + valueText.length;
+
+    if (charCount > 5500 || currentEmbed.fields.length >= 25) {
+      embeds.push(currentEmbed);
+      currentEmbed = {
+        title: playerName,
+        color: 0xBE1931,
+        fields: []
+      };
+      charCount = field.name.length + valueText.length;
+    }
+
+    currentEmbed.fields.push(field);
+  }
+
+  if (currentEmbed.fields.length > 0) {
+    embeds.push(currentEmbed);
+  }
+
+  for (var i = 0; i < embeds.length; i++) {
+    sendEmbedToDiscord(webhookUrl, embeds[i]);
+    Utilities.sleep(2000);
+  }
+
+  label.addToThread(threads[0]);
+}
+
+function sendEmbedToDiscord(webhookUrl, embed) {
+  var payload = JSON.stringify({
+    embeds: [embed]
+  });
+
+  UrlFetchApp.fetch(webhookUrl, {
+    method: "post",
+    contentType: "application/json",
+    payload: payload
+  });
+}

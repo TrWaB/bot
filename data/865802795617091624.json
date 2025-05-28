@@ -1,0 +1,11 @@
+{
+  "channels": {
+    "1375084717703168181": {
+      "serverSelection": {
+        "server": "hu93"
+      }
+    }
+  },
+  "defaultServer": "",
+  "welcome-message-channel-id": "1375084717703168181"
+}
